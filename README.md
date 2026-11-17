@@ -1,5 +1,9 @@
 # grounded-faq-api
 
+[![CI](https://github.com/Dheightsan/grounded-faq-api/actions/workflows/ci.yml/badge.svg)](https://github.com/Dheightsan/grounded-faq-api/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
+
 A small FastAPI service that answers questions only from a fixed fact file
 (`data/store.json`, a fictional hardware store in Santiago). When the fact is not
 there, it says `No tengo ese dato.` instead of guessing.
