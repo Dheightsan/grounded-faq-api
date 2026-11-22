@@ -1,9 +1,4 @@
-"""WhatsApp-style conversation: bookings, customer record and grounded FAQ.
-
-The flow is a small state machine kept in the database per phone number, so
-it works the same behind a webhook, n8n or the local CLI. Free text that is
-not a command goes to the grounded FAQ, which never answers outside the facts.
-"""
+"""Conversation state per phone number: bookings, customer record, FAQ."""
 
 import re
 from collections.abc import Callable

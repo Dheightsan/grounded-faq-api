@@ -45,8 +45,11 @@ Other endpoints: `GET /health`, `GET /facts?topic=precios`.
 ## How it works
 
 1. `app/retrieval.py` ranks facts with BM25 (lowercase, accents removed, short
-   Spanish stopword list). If the best score is under the threshold, the service
-   returns the fallback without calling a model.
+   Spanish stopword list, one-letter typos mapped to known words). Each fact can
+   carry `keywords`, other words a customer may use for it. The best fact also
+   has to cover at least half of the question's weight, so "cuanto cuesta un
+   masaje" does not get the price of a haircut. If not, the service returns the
+   fallback without calling a model.
 2. If `MODEL_API_KEY` and `MODEL_BASE_URL` are set, `app/chat_client.py` sends the
    top facts to a chat-completions endpoint (`MODEL_NAME` picks the model) with a
    system message that allows only those facts or the exact fallback. The request
@@ -63,33 +66,51 @@ pytest -q
 ```
 
 The tests use no network: the model is a fake injected through FastAPI
-dependencies, and the HTTP client runs on `httpx.MockTransport`. There are 103
-tests.
+dependencies, and the HTTP client runs on `httpx.MockTransport`.
 
 ## Evaluation
 
 ```bash
-python -m app.evaluate             # add --markdown for a table
+python -m app.evaluate                                     # add --markdown for a table
+python -m app.evaluate --questions data/eval_heldout.json
 ```
 
-It runs 58 questions from `data/eval.json` with no model: 42 about the barber
-shop and 16 about the hardware store. Of those, 20 ask for something the facts
-do not have. A question counts as correct when the expected fact is the source
-of the answer, and as rejected when the answer is `No tengo ese dato.` A wrong
-answer is another fact, or any fact for a question that should be rejected.
-`missed` means the facts had the answer and the service refused.
+Both runs use no model. A question counts as correct when the expected fact is
+the source of the answer, and as rejected when the answer is `No tengo ese
+dato.` A wrong answer is another fact, or any fact for a question that should be
+rejected. `missed` means the facts had the answer and the service refused.
+
+`data/eval.json` has 58 questions (42 barber shop, 16 hardware store), 20 of
+them about things the facts do not have. I wrote them before the first run. That
+run gave 30 correct and 23 wrong: almost any question sharing one word with a
+fact got that fact. The coverage rule and the keywords came from looking at
+those failures, so this set is no longer a fair test.
 
 | set | answerable | correct | missed | out_of_scope | rejected | wrong |
 |---|---|---|---|---|---|---|
-| barberia | 28 | 22 | 3 | 14 | 2 | 15 |
-| ferreteria | 10 | 8 | 0 | 6 | 0 | 8 |
-| total | 38 | 30 | 3 | 20 | 2 | 23 |
+| barberia | 28 | 22 | 6 | 14 | 13 | 1 |
+| ferreteria | 10 | 8 | 1 | 6 | 4 | 3 |
+| total | 38 | 30 | 7 | 20 | 17 | 4 |
+
+`data/eval_heldout.json` has 50 more questions, written from the fact texts
+only, without the code, the keywords or the first set. It was committed before
+it was run, and nothing was tuned on it.
+
+| set | answerable | correct | missed | out_of_scope | rejected | wrong |
+|---|---|---|---|---|---|---|
+| barberia | 19 | 7 | 12 | 11 | 11 | 0 |
+| ferreteria | 12 | 8 | 4 | 8 | 6 | 2 |
+| total | 31 | 15 | 16 | 19 | 17 | 2 |
+
+On that set the code before the change got 24 correct and 16 wrong. Now it is 15
+correct and 2 wrong. I'd rather it says it doesn't know than give a wrong price.
+Long chatty questions ("me pasas la direccion porfa, voy a
+ir con un amigo") are the ones it misses most.
 
 The same command runs 8 conversation scripts against the agent (booking, two
 customers for one slot, cancelling, asking for a person, erasing data, an expired
-confirmation, the booking limit, a question outside the data). 7 pass. The
-questions were written before the first run and were not changed after it. The
-floor for these numbers is pinned in `tests/test_evaluate.py`.
+confirmation, the booking limit, a question outside the data). All 8 pass. The
+floor for the first set is pinned in `tests/test_evaluate.py`.
 
 ## WhatsApp agent
 
@@ -103,25 +124,24 @@ flowchart LR
     A --> B[(Bookings in SQLite)]
 ```
 
-The same retrieval also runs a WhatsApp agent for a fictional barber shop
-(`data/barberia/`). The shop, its address, hours and prices are all made up. It books appointments, keeps a small customer list and
+The same retrieval also runs a WhatsApp agent for a made-up barber shop
+(`data/barberia/`). It books appointments, keeps a small customer list and
 answers questions from the shop's facts, with the same `No tengo ese dato.` rule.
 
-- **Bookings.** The customer picks a service, a day and a free time from
-  numbered lists. Free times come from the opening hours, the length of the
-  service and the bookings already taken. The overlap check and the insert run
-  in one write transaction, so two customers cannot get the same time.
-- **Customer data.** The name is saved only after the customer says yes, and
-  `BORRAR MIS DATOS` deletes the name, the bookings and the conversation.
-- **Handoff.** `4` or "hablar con una persona" passes the chat to the shop. The
-  bot answers once with "Te atiende una persona", then stays quiet until the
-  customer writes `MENU` or 12 hours pass. Replies carry `handoff: true`.
-- **Limits.** At most 2 active bookings per phone. A confirmation left for more
-  than 30 minutes expires and the bot says so.
-- **Questions.** Any other text goes to the grounded FAQ.
-- **Webhook.** Meta's verification handshake, the `X-Hub-Signature-256` check
-  (the webhook answers 503 until `WHATSAPP_APP_SECRET` is set), and retried
-  deliveries answered only once. Message ids are kept for 7 days.
+The customer books by picking a service, a day and a free time from numbered
+lists. Free times come from the opening hours, the service length and the
+bookings already taken. The overlap check and the insert run in one write
+transaction, so two customers cannot get the same time. At most 2 active
+bookings per phone, and a confirmation left for 30 minutes expires.
+
+The name is saved only after the customer says yes. `BORRAR MIS DATOS` deletes
+the name, the bookings and the conversation. `4` or "hablar con una persona"
+hands the chat to the shop. The bot says "Te atiende una persona" once and stays
+quiet until `MENU` or 12 hours later. Anything else goes to the FAQ.
+
+The webhook does Meta's verification handshake and checks
+`X-Hub-Signature-256` (it answers 503 until `WHATSAPP_APP_SECRET` is set).
+Retried deliveries are answered once, and message ids are kept for 7 days.
 
 Try it in the terminal, no keys or WhatsApp account needed:
 
@@ -171,16 +191,14 @@ signature. The direct mode above does.
 
 ## Limitations
 
-- Search is BM25 on words, with no embeddings. A paraphrase with no word in
-  common with the fact is missed, and a typo in the key word can bring a different fact.
-- Without a model, any question that scores over the threshold gets the best fact.
-  Asking for a service or product that does not exist, but sounds like one that
-  does, usually gets the price of the similar one. The eval shows 2 of 20 rejected.
-- The answer guard only checks model output, so this eval does not cover model mode.
-- In n8n mode the webhook signature is not checked. The direct webhook checks it.
-- One SQLite file and one process, with a lock around the connection.
-- Spanish only. Audio, images and stickers get a short notice.
-- The shop, the store and all their data are made up.
+- Search is BM25 on words, with no embeddings. Without a model, about half of the
+  answerable questions in the held-out set are refused, mostly long ones with
+  extra words or verbs the facts and keywords do not have.
+- A variant of a real product ("taladro percutor de 800 W") still gets the
+  price of the one the store has.
+- The coverage check runs before the model, so model mode refuses the same
+  questions, and I haven't run the eval with a model yet.
+- One SQLite file and one process.
 
 ## How I built it
 

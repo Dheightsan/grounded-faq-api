@@ -189,5 +189,5 @@ async def whatsapp_receive(
         replies.append(
             {"to": msg.phone, "text": reply.text, "handoff": reply.handoff, "sent": sent}
         )
-    # Meta only needs a 200; the body helps when testing with curl or n8n
+    # meta only needs a 200
     return {"replies": replies}

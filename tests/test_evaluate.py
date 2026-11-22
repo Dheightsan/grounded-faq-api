@@ -1,4 +1,4 @@
-from app.evaluate import run_questions, run_scripts, summarize
+from app.evaluate import DATA, run_questions, run_scripts, summarize
 
 
 def test_eval_numbers_do_not_drop():
@@ -13,6 +13,12 @@ def test_eval_numbers_do_not_drop():
 def test_conversation_scripts_do_not_drop():
     scripts = run_scripts()
     assert len(scripts) == 8
-    assert sum(scripts.values()) >= 7
+    assert sum(scripts.values()) == 8
     assert scripts["book an appointment"]
     assert scripts["two customers, same slot"]
+
+
+def test_heldout_numbers_do_not_drop():
+    total = summarize(run_questions(DATA / "eval_heldout.json"))[-1]
+    assert total["correct"] >= 15
+    assert total["wrong"] <= 2

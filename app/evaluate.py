@@ -2,6 +2,7 @@
 
 python -m app.evaluate             # plain text
 python -m app.evaluate --markdown  # table for the README
+python -m app.evaluate --questions data/eval_heldout.json
 """
 
 import argparse
@@ -200,10 +201,11 @@ def render(summary: list[dict], scripts: dict[str, bool], rows: list[dict], mark
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--markdown", action="store_true")
+    parser.add_argument("--questions", type=Path, default=DATA / "eval.json")
     args = parser.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    rows = run_questions()
+    rows = run_questions(args.questions)
     print(render(summarize(rows), run_scripts(), rows, args.markdown))
 
 
