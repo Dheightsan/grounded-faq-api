@@ -6,8 +6,8 @@ def test_eval_numbers_do_not_drop():
     assert total["answerable"] == 38
     assert total["out_of_scope"] == 20
     assert total["correct"] >= 30
-    assert total["rejected"] >= 2
-    assert total["wrong"] <= 23
+    assert total["rejected"] >= 17
+    assert total["wrong"] <= 4
 
 
 def test_conversation_scripts_do_not_drop():

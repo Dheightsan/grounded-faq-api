@@ -13,6 +13,8 @@ class Fact(BaseModel):
     id: str
     topic: str
     text: str
+    # other words a customer may use, only for search
+    keywords: str = ""
 
 
 def load_facts(path: str | Path | None = None) -> list[Fact]:
