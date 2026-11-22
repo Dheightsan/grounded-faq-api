@@ -19,14 +19,31 @@ from app.retrieval import Retriever, normalize
 from app.service import Model, answer_question
 
 STALE_AFTER = timedelta(minutes=30)
+HANDOFF_TTL = timedelta(hours=12)
+MAX_ACTIVE = 2
 MAX_SLOTS = 10
 MAX_DAYS = 6
 
-YES = {"si", "s", "ok", "dale", "ya", "bueno", "claro", "confirmo", "acepto", "listo"}
-NO = {"no", "n", "nop", "nopo", "mejor no"}
+YES_WORDS = {"si", "s", "sip", "ok", "okey", "dale", "bueno", "claro", "confirmo", "acepto"}
+YES_WORDS |= {"listo", "perfecto", "gracias"}
+YES_PHRASES = {"claro que si", "por supuesto", "si por favor", "de acuerdo"}
+NO_WORDS = {"no", "n", "nop", "nope", "nopo"}
+NO_FILLER = {"mejor", "gracias"}
 NAME = re.compile(r"[^\W\d_]+(?:[ '.-]+[^\W\d_]+)*\.?")
 MENU_WORDS = {"menu", "inicio", "0", "hola", "buenas", "buenos dias", "buenas tardes", "volver"}
 EXIT_HANDOFF = {"menu", "inicio", "volver"}
+HANDOFF_PHRASES = (
+    "hablar con una persona",
+    "hablar con alguien",
+    "hablar con un humano",
+    "persona real",
+    "atencion humana",
+)
+STALE_HINTS = {
+    "confirm": "Escribe 1 para reservar de nuevo",
+    "consent": "Escribe 1 para reservar de nuevo",
+    "erase": "Escribe BORRAR MIS DATOS para empezar de nuevo",
+}
 ERASE = "borrar mis datos"
 
 
@@ -46,11 +63,15 @@ def _has_word(text: str, *words: str) -> bool:
 
 
 def _yes(text: str) -> bool:
-    return text in YES or (text.split() or [""])[0] in YES
+    """True only if the whole message is a yes; anything with a "no" is not."""
+    words = text.split()
+    return text in YES_PHRASES or (bool(words) and all(w in YES_WORDS for w in words))
 
 
 def _no(text: str) -> bool:
-    return text in NO or (text.split() or [""])[0] in NO
+    words = text.split()
+    allowed = NO_WORDS | NO_FILLER
+    return bool(words) and all(w in allowed for w in words) and any(w in NO_WORDS for w in words)
 
 
 def _pick(text: str, count: int) -> int | None:
@@ -87,9 +108,16 @@ class Agent:
         t = _clean(text)
         saved = self.db.get_state(phone)
         state, data = ("idle", {})
+        stale = None
         if saved:
             state, data, updated = saved
-            if state != "handoff" and now - updated > STALE_AFTER:
+            if state == "handoff":
+                since = datetime.fromisoformat(data.get("since", updated.isoformat()))
+                expired = now - since > HANDOFF_TTL
+            else:
+                expired = now - updated > STALE_AFTER
+            if expired:
+                stale = state
                 state, data = "idle", {}
 
         if t == ERASE:
@@ -101,6 +129,10 @@ class Agent:
         if t in (EXIT_HANDOFF if state == "handoff" else MENU_WORDS):
             self.db.clear_state(phone)
             return Reply(text=self.menu())
+
+        if stale in STALE_HINTS and (_yes(t) or _no(t)):
+            self.db.clear_state(phone)
+            return Reply(text=f"Esa conversación ya venció. {STALE_HINTS[stale]} o MENU.")
 
         handler = getattr(self, f"_on_{state}", self._on_idle)
         return handler(phone, t, text.strip(), data, now)
@@ -125,8 +157,12 @@ class Agent:
             return Reply(text=self._list_upcoming(phone, now))
         if t == "3" or (_has_word(t, "cancelar", "anular") and len(t.split()) <= 5):
             return self._start_cancel(phone, now)
-        if t == "4" or _has_word(t, "humano", "persona", "ejecutivo", "ejecutiva", "alguien"):
-            self.db.set_state(phone, "handoff", {}, now)
+        if (
+            t == "4"
+            or _has_word(t, "humano", "ejecutivo", "ejecutiva")
+            or any(p in t for p in HANDOFF_PHRASES)
+        ):
+            self.db.set_state(phone, "handoff", {"since": now.isoformat(), "notified": False}, now)
             return Reply(
                 text="Listo, le avisé al equipo. Te escriben por aquí en horario de atención. "
                 "Si quieres volver al asistente escribe MENU.",
@@ -135,7 +171,14 @@ class Agent:
         return self._faq(raw)
 
     def _on_handoff(self, phone, t, raw, data, now) -> Reply:
-        # a person is handling this chat; the bot stays quiet until MENU
+        # a person is handling this chat; one notice, then quiet until MENU
+        if not data.get("notified"):
+            data = {"since": data.get("since", now.isoformat()), "notified": True}
+            self.db.set_state(phone, "handoff", data, now)
+            return Reply(
+                text="Te atiende una persona. Si quieres volver al menú, escribe MENU",
+                handoff=True,
+            )
         return Reply(text="", handoff=True)
 
     def _on_consent(self, phone, t, raw, data, now) -> Reply:
@@ -199,6 +242,9 @@ class Agent:
             return self._ask_slot(
                 phone, service.id, start.date().isoformat(), now, prefix="Esa hora ya pasó. "
             )
+        if len(self.db.upcoming(phone, now)) >= MAX_ACTIVE:
+            self.db.clear_state(phone)
+            return Reply(text=self._too_many())
         booking_id = self.db.add_booking(phone, service.id, start, end, now)
         if booking_id is None:
             return self._ask_slot(
@@ -233,12 +279,22 @@ class Agent:
         if _yes(t):
             self.db.erase_customer(phone)
             return Reply(text="Listo, borré tus datos y tus horas.")
-        self.db.clear_state(phone)
-        return Reply(text="No borré nada. Escribe MENU si necesitas algo más.")
+        if _no(t):
+            self.db.clear_state(phone)
+            return Reply(text="No borré nada. Escribe MENU si necesitas algo más.")
+        return Reply(text="Responde sí o no, por favor.")
 
     # steps
 
+    def _too_many(self) -> str:
+        return (
+            f"Ya tienes {MAX_ACTIVE} horas reservadas, que es el máximo. "
+            "Escribe 2 para verlas o 3 para cancelar una."
+        )
+
     def _start_booking(self, phone, now) -> Reply:
+        if len(self.db.upcoming(phone, now)) >= MAX_ACTIVE:
+            return Reply(text=self._too_many())
         if self.db.customer_name(phone):
             return self._ask_service(phone, now)
         self.db.set_state(phone, "consent", {}, now)

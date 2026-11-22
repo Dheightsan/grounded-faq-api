@@ -25,27 +25,40 @@ def verify_signature(app_secret: str, body: bytes, header: str | None) -> bool:
     if not header or not header.startswith("sha256="):
         return False
     expected = hmac.new(app_secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, header.removeprefix("sha256="))
+    return hmac.compare_digest(expected.encode(), header.removeprefix("sha256=").encode())
 
 
-def parse_incoming(payload: dict) -> list[Incoming]:
+def _items(value) -> list[dict]:
+    """The dicts inside a JSON list; anything else is skipped."""
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+
+def _dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def parse_incoming(payload) -> list[Incoming]:
     """Messages in a webhook payload. Status updates (sent, read) are ignored."""
     found = []
-    for entry in payload.get("entry") or []:
-        for change in entry.get("changes") or []:
-            for msg in (change.get("value") or {}).get("messages") or []:
-                if not msg.get("id") or not msg.get("from"):
+    for entry in _items(_dict(payload).get("entry")):
+        for change in _items(entry.get("changes")):
+            for msg in _items(_dict(change.get("value")).get("messages")):
+                if not isinstance(msg.get("id"), str) or not isinstance(msg.get("from"), str):
+                    continue
+                if not msg["id"] or not msg["from"]:
                     continue
                 kind = msg.get("type")
                 text = None
                 if kind == "text":
-                    text = (msg.get("text") or {}).get("body")
+                    text = _dict(msg.get("text")).get("body")
                 elif kind == "button":
-                    text = (msg.get("button") or {}).get("text")
+                    text = _dict(msg.get("button")).get("text")
                 elif kind == "interactive":
-                    inter = msg.get("interactive") or {}
-                    reply = inter.get("button_reply") or inter.get("list_reply") or {}
+                    inter = _dict(msg.get("interactive"))
+                    reply = _dict(inter.get("button_reply") or inter.get("list_reply"))
                     text = reply.get("title")
+                if not isinstance(text, str):
+                    text = None
                 found.append(Incoming(message_id=msg["id"], phone=msg["from"], text=text))
     return found
 

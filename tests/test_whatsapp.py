@@ -10,6 +10,7 @@ from app.main import app, get_agent, get_sender
 from app.whatsapp import NOT_TEXT, WhatsAppSender, parse_incoming, verify_signature
 
 KEY = "test-key"
+SECRET = "s3cret"
 PHONE = "56911111111"
 
 
@@ -46,11 +47,23 @@ def sender():
 def client(agent, sender, monkeypatch):
     monkeypatch.setenv("AGENT_API_KEY", KEY)
     monkeypatch.setenv("WHATSAPP_VERIFY_TOKEN", "verify-me")
-    monkeypatch.delenv("WHATSAPP_APP_SECRET", raising=False)
+    monkeypatch.setenv("WHATSAPP_APP_SECRET", SECRET)
     app.dependency_overrides[get_agent] = lambda: agent
     app.dependency_overrides[get_sender] = lambda: sender
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+def signed(content):
+    """Headers Meta would send for this raw body."""
+    sig = "sha256=" + hmac.new(SECRET.encode(), content, hashlib.sha256).hexdigest()
+    return {"x-hub-signature-256": sig, "content-type": "application/json"}
+
+
+def post_hook(client, data):
+    """POST a webhook payload with a valid signature."""
+    content = data if isinstance(data, bytes) else json.dumps(data).encode()
+    return client.post("/whatsapp/webhook", content=content, headers=signed(content))
 
 
 # signature and parsing
@@ -96,7 +109,7 @@ def test_verify_handshake(client):
 
 
 def test_webhook_replies_and_sends(client, sender):
-    r = client.post("/whatsapp/webhook", json=payload(text_msg("hola")))
+    r = post_hook(client, payload(text_msg("hola")))
     assert r.status_code == 200
     reply = r.json()["replies"][0]
     assert reply["to"] == PHONE and reply["sent"] is True
@@ -105,35 +118,85 @@ def test_webhook_replies_and_sends(client, sender):
 
 
 def test_webhook_ignores_retried_message(client, sender):
-    client.post("/whatsapp/webhook", json=payload(text_msg("hola")))
-    r = client.post("/whatsapp/webhook", json=payload(text_msg("hola")))
+    post_hook(client, payload(text_msg("hola")))
+    r = post_hook(client, payload(text_msg("hola")))
     assert r.json() == {"replies": []}
     assert len(sender.sent) == 1
 
 
 def test_webhook_non_text(client):
     msg = {"from": PHONE, "id": "wamid.9", "type": "audio", "audio": {"id": "a"}}
-    r = client.post("/whatsapp/webhook", json=payload(msg))
+    r = post_hook(client, payload(msg))
     assert r.json()["replies"][0]["text"] == NOT_TEXT
 
 
-def test_webhook_checks_signature_when_secret_is_set(client, monkeypatch):
-    monkeypatch.setenv("WHATSAPP_APP_SECRET", "s3cret")
+def test_webhook_checks_signature(client):
     body = json.dumps(payload(text_msg("hola"))).encode()
     bad_sig = {"x-hub-signature-256": "sha256=00"}
-    bad = client.post("/whatsapp/webhook", content=body, headers=bad_sig)
-    assert bad.status_code == 401
-    sig = "sha256=" + hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
-    ok = client.post(
-        "/whatsapp/webhook",
-        content=body,
-        headers={"x-hub-signature-256": sig, "content-type": "application/json"},
+    assert client.post("/whatsapp/webhook", content=body, headers=bad_sig).status_code == 401
+    assert client.post("/whatsapp/webhook", content=body).status_code == 401
+    assert post_hook(client, body).status_code == 200
+
+
+def test_webhook_is_closed_without_app_secret(client, monkeypatch, agent):
+    monkeypatch.delenv("WHATSAPP_APP_SECRET")
+    body = json.dumps(payload(text_msg("hola"))).encode()
+    assert client.post("/whatsapp/webhook", content=body).status_code == 503
+    assert post_hook(client, body).status_code == 503
+    assert agent.db.get_state(PHONE) is None
+
+
+def test_non_ascii_secrets_do_not_crash(client):
+    r = client.post(
+        "/agent/message",
+        json={"from": PHONE, "text": "hola"},
+        headers={"X-API-Key": "clav\xe9".encode("latin-1")},
     )
-    assert ok.status_code == 200
+    assert r.status_code == 401
+    bad_sig = {"x-hub-signature-256": "sha256=\xe9".encode("latin-1")}
+    assert client.post("/whatsapp/webhook", content=b"{}", headers=bad_sig).status_code == 401
+    params = {"hub.mode": "subscribe", "hub.verify_token": "se\xf1al", "hub.challenge": "1"}
+    assert client.get("/whatsapp/webhook", params=params).status_code == 403
+
+
+ODD_PAYLOADS = [
+    b"[1]",
+    b"null",
+    b'"x"',
+    b'{"entry": ["x"]}',
+    b'{"entry": [{"changes": [1, {"value": []}]}]}',
+    b'{"entry": [{"changes": [{"value": {"messages": [5, {"id": 1, "from": 2}]}}]}]}',
+]
+
+
+@pytest.mark.parametrize("body", ODD_PAYLOADS)
+def test_odd_payloads_do_not_crash(client, body):
+    r = post_hook(client, body)
+    assert r.status_code == 200 and r.json() == {"replies": []}
+
+
+def test_parse_ignores_wrong_types():
+    msg = {"from": PHONE, "id": "wamid.1", "type": "text", "text": {"body": 7}}
+    [m] = parse_incoming(payload(msg))
+    assert m.text is None
+
+
+def explode(*args):
+    raise RuntimeError("boom")
+
+
+def test_failed_message_can_be_retried(client, agent, monkeypatch):
+    real = agent.handle
+    monkeypatch.setattr(agent, "handle", explode)
+    boom = TestClient(app, raise_server_exceptions=False)
+    assert post_hook(boom, payload(text_msg("hola"))).status_code == 500
+    monkeypatch.setattr(agent, "handle", real)
+    r = post_hook(client, payload(text_msg("hola")))
+    assert "1. Reservar hora" in r.json()["replies"][0]["text"]
 
 
 def test_webhook_rejects_non_json(client):
-    r = client.post("/whatsapp/webhook", content=b"nope")
+    r = post_hook(client, b"nope")
     assert r.status_code == 400
 
 
@@ -161,6 +224,40 @@ def test_agent_message_and_bookings(client):
         "start": "2026-11-24T10:00:00", "end": "2026-11-24T10:30:00",
     }]  # fmt: skip
     assert client.get("/agent/bookings", params={"date": "2026-11-25"}, headers=h).json() == []
+
+
+def test_agent_message_with_id_answers_once(client):
+    h = {"X-API-Key": KEY}
+    body = {"from": PHONE, "text": "hola", "id": "wamid.77"}
+    first = client.post("/agent/message", json=body, headers=h).json()
+    assert "1. Reservar hora" in first["text"]
+    again = client.post("/agent/message", json=body, headers=h).json()
+    assert again == {"text": "", "handoff": False}
+
+
+def test_agent_message_failure_keeps_the_id_free(client, agent, monkeypatch):
+    h = {"X-API-Key": KEY}
+    body = {"from": PHONE, "text": "hola", "id": "wamid.78"}
+    real = agent.handle
+    monkeypatch.setattr(agent, "handle", explode)
+    boom = TestClient(app, raise_server_exceptions=False)
+    assert boom.post("/agent/message", json=body, headers=h).status_code == 500
+    monkeypatch.setattr(agent, "handle", real)
+    assert "Reservar" in client.post("/agent/message", json=body, headers=h).json()["text"]
+
+
+def test_handoff_flag_in_json(client):
+    h = {"X-API-Key": KEY}
+    r = client.post("/agent/message", json={"from": PHONE, "text": "4"}, headers=h)
+    assert r.json()["handoff"] is True
+    r = client.post("/agent/message", json={"from": PHONE, "text": "hola?"}, headers=h)
+    assert r.json() == {
+        "text": "Te atiende una persona. Si quieres volver al menú, escribe MENU",
+        "handoff": True,
+    }
+    r = post_hook(client, payload(text_msg("sigue ahí?", msg_id="wamid.5")))
+    assert r.json()["replies"][0]["handoff"] is True
+    assert r.json()["replies"][0]["text"] == ""
 
 
 def test_agent_message_rejects_bad_phone(client):

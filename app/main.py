@@ -75,17 +75,23 @@ def get_sender() -> WhatsAppSender | None:
     return WhatsAppSender.from_env()
 
 
+def _same(a: str, b: str) -> bool:
+    # compare_digest raises TypeError on non-ASCII str, so compare bytes
+    return secrets.compare_digest(a.encode(), b.encode())
+
+
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     expected = os.environ.get("AGENT_API_KEY")
     if not expected:
         raise HTTPException(503, "AGENT_API_KEY is not set")
-    if not x_api_key or not secrets.compare_digest(x_api_key, expected):
+    if not x_api_key or not _same(x_api_key, expected):
         raise HTTPException(401, "bad API key")
 
 
 class MessageIn(BaseModel):
     phone: str = Field(alias="from")
     text: str = Field(min_length=1, max_length=1000)
+    id: str | None = Field(default=None, max_length=200)  # WhatsApp message id, for retries
 
 
 @app.post("/agent/message", dependencies=[Depends(require_api_key)])
@@ -93,7 +99,14 @@ def agent_message(body: MessageIn, agent: Agent = Depends(get_agent)) -> Reply:
     """One customer message in, one reply out. Used by n8n or any other channel."""
     if not PHONE.fullmatch(body.phone):
         raise HTTPException(422, "phone must be 8 to 15 digits")
-    return agent.handle(body.phone.lstrip("+"), body.text)
+    if body.id and not agent.db.first_time(body.id, agent.now()):
+        return Reply(text="")  # a retry of a message already answered
+    try:
+        return agent.handle(body.phone.lstrip("+"), body.text)
+    except Exception:
+        if body.id:
+            agent.db.forget_message(body.id)
+        raise
 
 
 class BookingOut(BaseModel):
@@ -135,7 +148,7 @@ def whatsapp_verify(
 ) -> str:
     """Meta calls this once when the webhook URL is registered."""
     expected = os.environ.get("WHATSAPP_VERIFY_TOKEN")
-    if mode == "subscribe" and expected and token and secrets.compare_digest(token, expected):
+    if mode == "subscribe" and expected and token and _same(token, expected):
         return challenge
     raise HTTPException(403, "verification failed")
 
@@ -146,9 +159,11 @@ async def whatsapp_receive(
     agent: Agent = Depends(get_agent),
     sender: WhatsAppSender | None = Depends(get_sender),
 ) -> dict:
-    body = await request.body()
     secret = os.environ.get("WHATSAPP_APP_SECRET")
-    if secret and not verify_signature(secret, body, request.headers.get("x-hub-signature-256")):
+    if not secret:
+        raise HTTPException(503, "WHATSAPP_APP_SECRET is not set")
+    body = await request.body()
+    if not verify_signature(secret, body, request.headers.get("x-hub-signature-256")):
         raise HTTPException(401, "bad signature")
     try:
         payload = await request.json()
@@ -159,13 +174,18 @@ async def whatsapp_receive(
     for msg in parse_incoming(payload):
         if not agent.db.first_time(msg.message_id, agent.now()):
             continue  # Meta retried a delivery we already answered
-        if msg.text is None:
-            reply = Reply(text=NOT_TEXT)
-        else:
-            reply = await run_in_threadpool(agent.handle, msg.phone, msg.text)
-        sent = False
-        if reply.text and sender:
-            sent = await run_in_threadpool(sender.send_text, msg.phone, reply.text)
+        try:
+            if msg.text is None:
+                reply = Reply(text=NOT_TEXT)
+            else:
+                reply = await run_in_threadpool(agent.handle, msg.phone, msg.text)
+            sent = False
+            if reply.text and sender:
+                sent = await run_in_threadpool(sender.send_text, msg.phone, reply.text)
+        except Exception:
+            # let Meta's retry go through instead of answering nothing
+            agent.db.forget_message(msg.message_id)
+            raise
         replies.append(
             {"to": msg.phone, "text": reply.text, "handoff": reply.handoff, "sent": sent}
         )

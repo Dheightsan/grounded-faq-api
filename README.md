@@ -68,7 +68,7 @@ dependencies, and the HTTP client runs on `httpx.MockTransport`.
 ## WhatsApp agent
 
 The same retrieval also runs a WhatsApp agent for a fictional barber shop
-(`data/barberia/`). It books appointments, keeps a small customer list and
+(`data/barberia/`). The shop, its address, hours and prices are all made up. It books appointments, keeps a small customer list and
 answers questions from the shop's facts, with the same `No tengo ese dato.` rule.
 
 - **Bookings.** The customer picks a service, a day and a free time from
@@ -78,10 +78,14 @@ answers questions from the shop's facts, with the same `No tengo ese dato.` rule
 - **Customer data.** The name is saved only after the customer says yes, and
   `BORRAR MIS DATOS` deletes the name, the bookings and the conversation.
 - **Handoff.** `4` or "hablar con una persona" passes the chat to the shop. The
-  bot stays quiet until the customer writes `MENU`.
+  bot answers once with "Te atiende una persona", then stays quiet until the
+  customer writes `MENU` or 12 hours pass. Replies carry `handoff: true`.
+- **Limits.** At most 2 active bookings per phone. A confirmation left for more
+  than 30 minutes expires and the bot says so.
 - **Questions.** Any other text goes to the grounded FAQ.
 - **Webhook.** Meta's verification handshake, the `X-Hub-Signature-256` check
-  when `WHATSAPP_APP_SECRET` is set, and retried deliveries answered only once.
+  (the webhook answers 503 until `WHATSAPP_APP_SECRET` is set), and retried
+  deliveries answered only once. Message ids are kept for 7 days.
 
 Try it in the terminal, no keys or WhatsApp account needed:
 
@@ -101,7 +105,7 @@ curl -s localhost:8000/agent/message \
 
 | Endpoint | Auth | Use |
 |---|---|---|
-| `POST /agent/message` | `X-API-Key` | one message in, one reply out (n8n or any other channel) |
+| `POST /agent/message` | `X-API-Key` | one message in, one reply out; optional `id` makes retries safe (n8n or any other channel) |
 | `GET /agent/bookings?date=YYYY-MM-DD` | `X-API-Key` | bookings of one day, for reminders |
 | `GET /whatsapp/webhook` | verify token | Meta's handshake |
 | `POST /whatsapp/webhook` | app secret | messages from WhatsApp Cloud API |
@@ -118,6 +122,11 @@ with the API key (an n8n "Header Auth" credential named `Agent API key`, header
 `X-API-Key`) and sends the reply. Meta's GET handshake is checked against the
 API, so the verify token is kept in one place. `n8n/reminders.json` reads
 tomorrow's bookings every day at 18:00 and sends a reminder template.
+
+n8n passes the WhatsApp message id as `id`, so Meta's retries are answered once.
+When the reply has `handoff: true`, the disabled `Notify the shop` node can
+message the shop. Audio, images and stickers are ignored in this mode (n8n
+sends no reply); the direct webhook answers them with a short notice.
 
 The nodes that send to WhatsApp ship disabled. To go live, add a `WhatsApp
 token` credential (`Authorization: Bearer <token>`), put the phone number id in

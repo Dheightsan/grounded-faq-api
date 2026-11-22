@@ -2,7 +2,7 @@
   {"id": "horario-1", "topic": "horario", "text": "La Barbería Los Aromos atiende de martes a viernes de 10:00 a 19:00 horas."},
   {"id": "horario-2", "topic": "horario", "text": "Los sábados atendemos de 10:00 a 15:00 horas."},
   {"id": "horario-3", "topic": "horario", "text": "Los domingos y lunes la barbería está cerrada."},
-  {"id": "direccion-1", "topic": "direccion", "text": "La barbería queda en Avenida Ficticia 456, Ñuñoa (dirección inventada para este ejemplo)."},
+  {"id": "direccion-1", "topic": "direccion", "text": "La barbería queda en Avenida Ficticia 456, Ñuñoa."},
   {"id": "precio-corte", "topic": "precios", "text": "El corte de pelo cuesta $12.000 y dura 30 minutos."},
   {"id": "precio-corte-barba", "topic": "precios", "text": "El corte de pelo con barba cuesta $16.000 y dura 60 minutos."},
   {"id": "precio-barba", "topic": "precios", "text": "El perfilado de barba cuesta $8.000 y dura 30 minutos."},
@@ -12,5 +12,5 @@
   {"id": "cancelacion-1", "topic": "reservas", "text": "Política de cancelación: para cancelar una hora escribe CANCELAR. Pedimos avisar con al menos 2 horas de anticipación."},
   {"id": "atraso-1", "topic": "reservas", "text": "Si llegas más de 15 minutos tarde, la hora se puede perder si hay otro cliente esperando."},
   {"id": "estacionamiento-1", "topic": "llegar", "text": "No tenemos estacionamiento propio; hay estacionamiento pagado en la calle."},
-  {"id": "metro-1", "topic": "llegar", "text": "La estación de metro más cercana está a 5 cuadras (dato inventado para este ejemplo)."}
+  {"id": "metro-1", "topic": "llegar", "text": "La estación de metro más cercana está a 5 cuadras."}
 ]

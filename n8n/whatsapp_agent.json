@@ -65,7 +65,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ from: $json.from, text: $json.text }) }}",
+        "jsonBody": "={{ JSON.stringify({ from: $json.from, text: $json.text, id: $json.id }) }}",
         "options": { "timeout": 20000 }
       },
       "credentials": {
@@ -112,6 +112,52 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $('Extract messages').item.json.from, type: 'text', text: { body: $json.text } }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "whatsappToken001", "name": "WhatsApp token" }
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000012",
+      "name": "Needs a person?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1100, 40],
+      "notes": "The API sets handoff to true while a person is handling the chat.",
+      "parameters": {
+        "looseTypeValidation": true,
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c0000000-0000-4000-8000-000000000003",
+              "leftValue": "={{ $json.handoff }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000013",
+      "name": "Notify the shop",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 40],
+      "disabled": true,
+      "notes": "Disabled in the demo. Put the shop's WhatsApp number in the body and enable it so a person sees the chat that needs them.",
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v23.0/YOUR_PHONE_NUMBER_ID/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: 'SHOP_PHONE_NUMBER', type: 'text', text: { body: 'Customer ' + $('Extract messages').item.json.from + ' needs a person: ' + $('Extract messages').item.json.text } }) }}",
         "options": { "timeout": 10000 }
       },
       "credentials": {
@@ -201,7 +247,15 @@
         [{ "node": "Nothing to answer", "type": "main", "index": 0 }]
       ]
     },
-    "Ask the agent": { "main": [[{ "node": "Has a reply?", "type": "main", "index": 0 }]] },
+    "Ask the agent": {
+      "main": [[
+        { "node": "Has a reply?", "type": "main", "index": 0 },
+        { "node": "Needs a person?", "type": "main", "index": 0 }
+      ]]
+    },
+    "Needs a person?": {
+      "main": [[{ "node": "Notify the shop", "type": "main", "index": 0 }], []]
+    },
     "Has a reply?": {
       "main": [
         [{ "node": "Send on WhatsApp", "type": "main", "index": 0 }],

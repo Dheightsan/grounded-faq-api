@@ -1,3 +1,7 @@
+from datetime import datetime, timedelta
+
+import pytest
+
 from app.guard import FALLBACK
 from tests.conftest import book, say
 
@@ -93,13 +97,86 @@ def test_erase_can_be_declined(agent):
     assert agent.db.customer_name(ANA) == "Ana Pérez"
 
 
-def test_handoff_keeps_bot_quiet_until_menu(agent):
+def test_handoff_notice_once_then_quiet_until_menu(agent):
     reply = agent.handle(ANA, "quiero hablar con una persona")
     assert reply.handoff and "le avisé al equipo" in reply.text
-    for text in ["hola? alguien?", "hola"]:
+    notice = agent.handle(ANA, "hola? alguien?")
+    assert notice.handoff
+    assert notice.text == "Te atiende una persona. Si quieres volver al menú, escribe MENU"
+    for text in ["hola", "sigo esperando"]:
         quiet = agent.handle(ANA, text)
         assert quiet.handoff and quiet.text == ""
     assert "1. Reservar hora" in say(agent, ANA, "menu")
+
+
+def test_handoff_expires_after_12_hours(agent, clock):
+    agent.handle(ANA, "4")
+    clock.set(2026, 11, 23, 20, 0)
+    assert agent.handle(ANA, "sigo esperando").handoff
+    clock.set(2026, 11, 23, 21, 30)
+    reply = agent.handle(ANA, "horario")
+    assert not reply.handoff and reply.text
+
+
+@pytest.mark.parametrize(
+    "text", ["cuanto cuesta para una persona", "somos tres personas", "hay alguien en la barberia"]
+)
+def test_loose_words_do_not_trigger_handoff(agent, text):
+    assert not agent.handle(ANA, text).handoff
+
+
+@pytest.mark.parametrize("text", ["humano por favor", "quiero un ejecutivo", "Hablar con alguien"])
+def test_clear_phrases_trigger_handoff(agent, text):
+    assert agent.handle(ANA, text).handoff
+
+
+def test_ya_no_does_not_confirm(agent):
+    say(agent, ANA, "reservar", "si", "Ana", "1", "1", "1")
+    assert say(agent, ANA, "ya no") == "Responde sí o no, por favor."
+    assert agent.db.upcoming(ANA, agent.now()) == []
+    assert "quedó reservada" in say(agent, ANA, "¡Sí!")
+
+
+def test_ambiguous_answer_does_not_erase(agent):
+    book(agent, ANA)
+    say(agent, ANA, "borrar mis datos")
+    assert say(agent, ANA, "ya no quiero que lo borres") == "Responde sí o no, por favor."
+    assert agent.db.customer_name(ANA) == "Ana Pérez"
+    assert "No borré nada" in say(agent, ANA, "no, gracias")
+    assert agent.db.customer_name(ANA) == "Ana Pérez"
+
+
+def test_stale_confirmation_explains(agent, clock):
+    say(agent, ANA, "reservar", "si", "Ana", "1", "1", "1")
+    clock.set(2026, 11, 23, 9, 45)
+    text = say(agent, ANA, "si")
+    assert text.startswith("Esa conversación ya venció.") and "1" in text
+    assert agent.db.upcoming(ANA, agent.now()) == []
+
+
+def test_two_active_bookings_at_most(agent):
+    book(agent, ANA, slot="1")
+    book(agent, ANA, slot="3")
+    text = say(agent, ANA, "reservar")
+    assert text.startswith("Ya tienes 2 horas reservadas")
+    say(agent, ANA, "cancelar", "1")
+    assert "¿Qué servicio quieres?" in say(agent, ANA, "reservar")
+
+
+def test_cap_is_checked_again_at_confirmation(agent):
+    say(agent, ANA, "reservar", "si", "Ana", "1", "1", "1")  # waits at the confirmation
+    for hour in (14, 15):
+        start = datetime(2026, 11, 24, hour, 0)
+        agent.db.add_booking(ANA, "corte", start, start + timedelta(minutes=30), agent.now())
+    assert say(agent, ANA, "si").startswith("Ya tienes 2 horas reservadas")
+
+
+def test_processed_ids_are_purged_after_a_week(agent):
+    day = datetime(2026, 11, 1, 9, 0)
+    assert agent.db.first_time("old", day)
+    assert agent.db.first_time("new", day + timedelta(days=8))
+    assert agent.db.first_time("old", day + timedelta(days=8))  # purged, seen as new again
+    assert not agent.db.first_time("new", day + timedelta(days=8))
 
 
 def test_later_slots_page(agent):

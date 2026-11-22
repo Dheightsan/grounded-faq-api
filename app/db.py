@@ -3,7 +3,7 @@
 import json
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS processed_messages (
 """
 
 FMT = "%Y-%m-%dT%H:%M"
+MESSAGE_ID_TTL = timedelta(days=7)
 
 
 class Booking(BaseModel):
@@ -177,8 +178,17 @@ class AgentDB:
     def first_time(self, message_id: str, now: datetime) -> bool:
         """True the first time a message id is seen; WhatsApp retries deliveries."""
         with self.lock:
+            self.conn.execute(
+                "DELETE FROM processed_messages WHERE received_at < ?",
+                ((now - MESSAGE_ID_TTL).strftime(FMT),),
+            )
             cur = self.conn.execute(
                 "INSERT OR IGNORE INTO processed_messages (message_id, received_at) VALUES (?, ?)",
                 (message_id, now.strftime(FMT)),
             )
         return cur.rowcount == 1
+
+    def forget_message(self, message_id: str) -> None:
+        """Undo first_time so a retry is processed again after a failure."""
+        with self.lock:
+            self.conn.execute("DELETE FROM processed_messages WHERE message_id = ?", (message_id,))

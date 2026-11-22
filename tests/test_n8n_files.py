@@ -34,3 +34,20 @@ def test_agent_calls_use_the_api_key_credential():
     ask = next(n for n in wf["nodes"] if n["name"] == "Ask the agent")
     assert ask["parameters"]["genericAuthType"] == "httpHeaderAuth"
     assert ask["credentials"]["httpHeaderAuth"]["name"] == "Agent API key"
+
+
+def test_agent_call_passes_the_message_id():
+    wf = json.loads((N8N / "whatsapp_agent.json").read_text(encoding="utf-8"))
+    ask = next(n for n in wf["nodes"] if n["name"] == "Ask the agent")
+    assert "id: $json.id" in ask["parameters"]["jsonBody"]
+
+
+def test_notify_the_shop_is_wired_to_handoff_and_disabled():
+    wf = json.loads((N8N / "whatsapp_agent.json").read_text(encoding="utf-8"))
+    nodes = {n["name"]: n for n in wf["nodes"]}
+    assert nodes["Notify the shop"]["disabled"] is True
+    assert "$json.handoff" in json.dumps(nodes["Needs a person?"]["parameters"])
+    ask_targets = [link["node"] for link in wf["connections"]["Ask the agent"]["main"][0]]
+    assert "Needs a person?" in ask_targets
+    true_branch = wf["connections"]["Needs a person?"]["main"][0]
+    assert [link["node"] for link in true_branch] == ["Notify the shop"]
