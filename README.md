@@ -63,9 +63,45 @@ pytest -q
 ```
 
 The tests use no network: the model is a fake injected through FastAPI
-dependencies, and the HTTP client runs on `httpx.MockTransport`.
+dependencies, and the HTTP client runs on `httpx.MockTransport`. There are 103
+tests.
+
+## Evaluation
+
+```bash
+python -m app.evaluate             # add --markdown for a table
+```
+
+It runs 58 questions from `data/eval.json` with no model: 42 about the barber
+shop and 16 about the hardware store. Of those, 20 ask for something the facts
+do not have. A question counts as correct when the expected fact is the source
+of the answer, and as rejected when the answer is `No tengo ese dato.` A wrong
+answer is another fact, or any fact for a question that should be rejected.
+`missed` means the facts had the answer and the service refused.
+
+| set | answerable | correct | missed | out_of_scope | rejected | wrong |
+|---|---|---|---|---|---|---|
+| barberia | 28 | 22 | 3 | 14 | 2 | 15 |
+| ferreteria | 10 | 8 | 0 | 6 | 0 | 8 |
+| total | 38 | 30 | 3 | 20 | 2 | 23 |
+
+The same command runs 8 conversation scripts against the agent (booking, two
+customers for one slot, cancelling, asking for a person, erasing data, an expired
+confirmation, the booking limit, a question outside the data). 7 pass. The
+questions were written before the first run and were not changed after it. The
+floor for these numbers is pinned in `tests/test_evaluate.py`.
 
 ## WhatsApp agent
+
+```mermaid
+flowchart LR
+    W[WhatsApp] --> D[Direct webhook]
+    W --> N[n8n]
+    D --> A[API]
+    N --> A
+    A --> F[Search and guard]
+    A --> B[(Bookings in SQLite)]
+```
 
 The same retrieval also runs a WhatsApp agent for a fictional barber shop
 (`data/barberia/`). The shop, its address, hours and prices are all made up. It books appointments, keeps a small customer list and
@@ -132,6 +168,19 @@ The nodes that send to WhatsApp ship disabled. To go live, add a `WhatsApp
 token` credential (`Authorization: Bearer <token>`), put the phone number id in
 their URL and enable them. In this mode n8n does not check the webhook
 signature. The direct mode above does.
+
+## Limitations
+
+- Search is BM25 on words, with no embeddings. A paraphrase with no word in
+  common with the fact is missed, and a typo in the key word can bring a different fact.
+- Without a model, any question that scores over the threshold gets the best fact.
+  Asking for a service or product that does not exist, but sounds like one that
+  does, usually gets the price of the similar one. The eval shows 2 of 20 rejected.
+- The answer guard only checks model output, so this eval does not cover model mode.
+- In n8n mode the webhook signature is not checked. The direct webhook checks it.
+- One SQLite file and one process, with a lock around the connection.
+- Spanish only. Audio, images and stickers get a short notice.
+- The shop, the store and all their data are made up.
 
 ## How I built it
 
