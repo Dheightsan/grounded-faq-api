@@ -19,8 +19,10 @@ MAX_ACTIVE = 2
 MAX_SLOTS = 10
 MAX_DAYS = 6
 
-YES_WORDS = {"si", "s", "sip", "ok", "okey", "dale", "bueno", "claro", "confirmo", "acepto"}
-YES_WORDS |= {"listo", "perfecto", "gracias"}
+YES_WORDS = {
+    "si", "s", "sip", "ok", "okey", "dale", "bueno", "claro", "confirmo", "acepto",
+    "listo", "perfecto", "gracias",
+}  # fmt: skip
 YES_PHRASES = {"claro que si", "por supuesto", "si por favor", "de acuerdo"}
 NO_WORDS = {"no", "n", "nop", "nope", "nopo"}
 NO_FILLER = {"mejor", "gracias"}

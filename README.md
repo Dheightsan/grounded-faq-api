@@ -103,14 +103,11 @@ it was run, and nothing was tuned on it.
 | total | 31 | 15 | 16 | 19 | 17 | 2 |
 
 On that set the code before the change got 24 correct and 16 wrong. Now it is 15
-correct and 2 wrong. I'd rather it says it doesn't know than give a wrong price.
-Long chatty questions ("me pasas la direccion porfa, voy a
-ir con un amigo") are the ones it misses most.
+correct and 2 wrong, and missed went from 2 to 16. Most of the misses are long
+chatty questions like "me pasas la direccion porfa, voy a ir con un amigo".
 
-The same command runs 8 conversation scripts against the agent (booking, two
-customers for one slot, cancelling, asking for a person, erasing data, an expired
-confirmation, the booking limit, a question outside the data). All 8 pass. The
-floor for the first set is pinned in `tests/test_evaluate.py`.
+The same command runs 8 conversation scripts against the agent, and all 8 pass.
+Both floors are pinned in `tests/test_evaluate.py`.
 
 ## WhatsApp agent
 
