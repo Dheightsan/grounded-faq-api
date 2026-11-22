@@ -1,0 +1,215 @@
+{
+  "id": "waAgentDemo00001",
+  "name": "WhatsApp agent (barbería demo)",
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "nodes": [
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000001",
+      "name": "WhatsApp webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "0b6f4a52-7d1e-4f0a-9c3b-5a7e2d9c1f01",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000002",
+      "name": "Extract messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "parameters": {
+        "jsCode": "// Meta sends messages and status updates (sent, read) to the same URL.\n// Keep only customer messages; non-text ones get an empty text.\nconst out = [];\nfor (const item of $input.all()) {\n  const body = item.json.body || {};\n  for (const entry of body.entry || []) {\n    for (const change of entry.changes || []) {\n      for (const m of (change.value || {}).messages || []) {\n        let text = '';\n        if (m.type === 'text') text = m.text?.body || '';\n        else if (m.type === 'button') text = m.button?.text || '';\n        else if (m.type === 'interactive') {\n          const r = m.interactive?.button_reply || m.interactive?.list_reply || {};\n          text = r.title || '';\n        }\n        out.push({ json: { from: m.from, id: m.id, text } });\n      }\n    }\n  }\n}\nreturn out.length ? out : [{ json: { from: '', id: '', text: '' } }];"
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000003",
+      "name": "Is it a text message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 0],
+      "parameters": {
+        "looseTypeValidation": true,
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c0000000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.text }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000004",
+      "name": "Ask the agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, -100],
+      "notes": "Change the URL to where the FastAPI service runs. The credential sends the X-API-Key header.",
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/agent/message",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ from: $json.from, text: $json.text }) }}",
+        "options": { "timeout": 20000 }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "agentApiKey00001", "name": "Agent API key" }
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000005",
+      "name": "Has a reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [880, -100],
+      "notes": "Empty text means a person is handling the chat, so nothing is sent.",
+      "parameters": {
+        "looseTypeValidation": true,
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c0000000-0000-4000-8000-000000000002",
+              "leftValue": "={{ $json.text }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000006",
+      "name": "Send on WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, -200],
+      "disabled": true,
+      "notes": "Disabled in the demo. To go live: put your phone number id in the URL, create the 'WhatsApp token' credential (Authorization: Bearer <token>) and enable this node.",
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v23.0/YOUR_PHONE_NUMBER_ID/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $('Extract messages').item.json.from, type: 'text', text: { body: $json.text } }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "whatsappToken001", "name": "WhatsApp token" }
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000007",
+      "name": "Reply to webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1320, -100],
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000009",
+      "name": "Meta verification (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 360],
+      "webhookId": "0b6f4a52-7d1e-4f0a-9c3b-5a7e2d9c1f02",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000010",
+      "name": "Check token with the API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 360],
+      "notes": "The verify token lives only in the API (WHATSAPP_VERIFY_TOKEN). A wrong token makes this node fail, so Meta gets an error and the URL is not registered.",
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8000/whatsapp/webhook",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "hub.mode", "value": "={{ $json.query['hub.mode'] }}" },
+            { "name": "hub.verify_token", "value": "={{ $json.query['hub.verify_token'] }}" },
+            { "name": "hub.challenge", "value": "={{ $json.query['hub.challenge'] }}" }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "response": { "response": { "responseFormat": "text", "outputPropertyName": "challenge" } }
+        }
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000011",
+      "name": "Return challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 360],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "5f0c2d1e-0a1b-4c3d-9e8f-000000000008",
+      "name": "Nothing to answer",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [660, 120],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"replies\": [] }",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "WhatsApp webhook": { "main": [[{ "node": "Extract messages", "type": "main", "index": 0 }]] },
+    "Extract messages": { "main": [[{ "node": "Is it a text message?", "type": "main", "index": 0 }]] },
+    "Is it a text message?": {
+      "main": [
+        [{ "node": "Ask the agent", "type": "main", "index": 0 }],
+        [{ "node": "Nothing to answer", "type": "main", "index": 0 }]
+      ]
+    },
+    "Ask the agent": { "main": [[{ "node": "Has a reply?", "type": "main", "index": 0 }]] },
+    "Has a reply?": {
+      "main": [
+        [{ "node": "Send on WhatsApp", "type": "main", "index": 0 }],
+        [{ "node": "Reply to webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send on WhatsApp": { "main": [[{ "node": "Reply to webhook", "type": "main", "index": 0 }]] },
+    "Meta verification (GET)": { "main": [[{ "node": "Check token with the API", "type": "main", "index": 0 }]] },
+    "Check token with the API": { "main": [[{ "node": "Return challenge", "type": "main", "index": 0 }]] }
+  }
+}

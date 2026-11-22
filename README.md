@@ -65,6 +65,65 @@ pytest -q
 The tests use no network: the model is a fake injected through FastAPI
 dependencies, and the HTTP client runs on `httpx.MockTransport`.
 
+## WhatsApp agent
+
+The same retrieval also runs a WhatsApp agent for a fictional barber shop
+(`data/barberia/`). It books appointments, keeps a small customer list and
+answers questions from the shop's facts, with the same `No tengo ese dato.` rule.
+
+- **Bookings.** The customer picks a service, a day and a free time from
+  numbered lists. Free times come from the opening hours, the length of the
+  service and the bookings already taken. The overlap check and the insert run
+  in one write transaction, so two customers cannot get the same time.
+- **Customer data.** The name is saved only after the customer says yes, and
+  `BORRAR MIS DATOS` deletes the name, the bookings and the conversation.
+- **Handoff.** `4` or "hablar con una persona" passes the chat to the shop. The
+  bot stays quiet until the customer writes `MENU`.
+- **Questions.** Any other text goes to the grounded FAQ.
+- **Webhook.** Meta's verification handshake, the `X-Hub-Signature-256` check
+  when `WHATSAPP_APP_SECRET` is set, and retried deliveries answered only once.
+
+Try it in the terminal, no keys or WhatsApp account needed:
+
+```bash
+python -m app.cli
+```
+
+Or through the API:
+
+```bash
+export AGENT_API_KEY=change-me
+uvicorn app.main:app
+curl -s localhost:8000/agent/message \
+  -H "X-API-Key: change-me" -H "Content-Type: application/json" \
+  -d '{"from": "56911111111", "text": "hola"}'
+```
+
+| Endpoint | Auth | Use |
+|---|---|---|
+| `POST /agent/message` | `X-API-Key` | one message in, one reply out (n8n or any other channel) |
+| `GET /agent/bookings?date=YYYY-MM-DD` | `X-API-Key` | bookings of one day, for reminders |
+| `GET /whatsapp/webhook` | verify token | Meta's handshake |
+| `POST /whatsapp/webhook` | app secret | messages from WhatsApp Cloud API |
+
+Settings: `AGENT_API_KEY`, `AGENT_DB_PATH` (default `agent.db`), `AGENT_DATA_DIR`
+(default `data/barberia`), and for WhatsApp `WHATSAPP_VERIFY_TOKEN`,
+`WHATSAPP_APP_SECRET`, `WHATSAPP_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID`. Without
+the token the agent still answers, it just does not send anything.
+
+### With n8n
+
+`n8n/whatsapp_agent.json` receives the WhatsApp webhook, calls `/agent/message`
+with the API key (an n8n "Header Auth" credential named `Agent API key`, header
+`X-API-Key`) and sends the reply. Meta's GET handshake is checked against the
+API, so the verify token is kept in one place. `n8n/reminders.json` reads
+tomorrow's bookings every day at 18:00 and sends a reminder template.
+
+The nodes that send to WhatsApp ship disabled. To go live, add a `WhatsApp
+token` credential (`Authorization: Bearer <token>`), put the phone number id in
+their URL and enable them. In this mode n8n does not check the webhook
+signature; the direct mode above does.
+
 ## License
 
 MIT

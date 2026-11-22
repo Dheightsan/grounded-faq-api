@@ -1,0 +1,68 @@
+{
+  "id": "waRemindersDemo1",
+  "name": "Booking reminders (barbería demo)",
+  "active": false,
+  "settings": { "executionOrder": "v1", "timezone": "America/Santiago" },
+  "nodes": [
+    {
+      "id": "6a1d3e2f-1b2c-4d4e-8f90-000000000001",
+      "name": "Every day at 18:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "parameters": {
+        "rule": { "interval": [{ "field": "days", "triggerAtHour": 18 }] }
+      }
+    },
+    {
+      "id": "6a1d3e2f-1b2c-4d4e-8f90-000000000002",
+      "name": "Tomorrow's bookings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "notes": "Returns one item per booking. Same 'Agent API key' credential as the chat workflow.",
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8000/agent/bookings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "date", "value": "={{ $now.setZone('America/Santiago').plus({ days: 1 }).toFormat('yyyy-MM-dd') }}" }
+          ]
+        },
+        "options": { "timeout": 20000 }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "agentApiKey00001", "name": "Agent API key" }
+      }
+    },
+    {
+      "id": "6a1d3e2f-1b2c-4d4e-8f90-000000000003",
+      "name": "Send reminder template",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0],
+      "disabled": true,
+      "notes": "Disabled in the demo. Outside the 24 hour window WhatsApp only allows approved templates, so this sends a template named 'recordatorio_hora' with name, service and time as parameters.",
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v23.0/YOUR_PHONE_NUMBER_ID/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.phone, type: 'template', template: { name: 'recordatorio_hora', language: { code: 'es' }, components: [{ type: 'body', parameters: [{ type: 'text', text: $json.name || 'cliente' }, { type: 'text', text: $json.service }, { type: 'text', text: $json.start.slice(11, 16) }] }] } }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "whatsappToken001", "name": "WhatsApp token" }
+      }
+    }
+  ],
+  "connections": {
+    "Every day at 18:00": { "main": [[{ "node": "Tomorrow's bookings", "type": "main", "index": 0 }]] },
+    "Tomorrow's bookings": { "main": [[{ "node": "Send reminder template", "type": "main", "index": 0 }]] }
+  }
+}
