@@ -105,7 +105,7 @@ curl -s localhost:8000/agent/message \
 
 | Endpoint | Auth | Use |
 |---|---|---|
-| `POST /agent/message` | `X-API-Key` | one message in, one reply out; optional `id` makes retries safe (n8n or any other channel) |
+| `POST /agent/message` | `X-API-Key` | one message in, one reply out. Optional `id` makes retries safe (n8n or any other channel) |
 | `GET /agent/bookings?date=YYYY-MM-DD` | `X-API-Key` | bookings of one day, for reminders |
 | `GET /whatsapp/webhook` | verify token | Meta's handshake |
 | `POST /whatsapp/webhook` | app secret | messages from WhatsApp Cloud API |
@@ -125,13 +125,19 @@ tomorrow's bookings every day at 18:00 and sends a reminder template.
 
 n8n passes the WhatsApp message id as `id`, so Meta's retries are answered once.
 When the reply has `handoff: true`, the disabled `Notify the shop` node can
-message the shop. Audio, images and stickers are ignored in this mode (n8n
-sends no reply); the direct webhook answers them with a short notice.
+message the shop. In this mode n8n ignores audio, images and stickers and sends
+no reply. The direct webhook answers them with a short notice.
 
 The nodes that send to WhatsApp ship disabled. To go live, add a `WhatsApp
 token` credential (`Authorization: Bearer <token>`), put the phone number id in
 their URL and enable them. In this mode n8n does not check the webhook
-signature; the direct mode above does.
+signature. The direct mode above does.
+
+## How I built it
+
+I built it with Claude Code. What I checked most was that two people can never
+get the same slot and that the bot says it doesn't know instead of making up an
+answer. Both are covered by the tests.
 
 ## License
 
