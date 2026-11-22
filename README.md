@@ -199,9 +199,10 @@ signature. The direct mode above does.
 
 ## How I built it
 
-I built it with Claude Code. What I checked most was that two people can never
-get the same slot and that the bot says it doesn't know instead of making up an
-answer. Both are covered by the tests.
+I built it with Claude Code. What I checked most by hand was the booking, so two
+people can never get the same slot. The tests for that are in
+`tests/test_agent.py`. The other one was the `No tengo ese dato.` rule, and the
+eval above shows where it still misses.
 
 ## License
 
