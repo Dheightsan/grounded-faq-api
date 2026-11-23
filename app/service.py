@@ -29,11 +29,17 @@ def answer_question(question: str, retriever: Retriever, model: Model | None) ->
 def trace_answer(question: str, retriever: Retriever, model: Model | None) -> tuple[Answer, str]:
     """The answer and the step that decided it.
 
-    Steps: no_match, extractive, model, refused, blocked.
+    Steps: no_match, extractive, model, rescued, refused, uncited, blocked.
     """
     hits = retriever.search(question)
     if not hits:
-        return _no_answer(), "no_match"
+        # weak match: with a model, let it read the top facts and decide
+        facts = retriever.candidates(question) if model else []
+        text = model.complete(question, facts) if facts else None
+        if text is None:
+            return _no_answer(), "no_match"
+        answer, step = _check(text, facts)
+        return answer, "rescued" if step == "model" else step
 
     facts = [fact for fact, _ in hits]
     text = model.complete(question, facts) if model else None

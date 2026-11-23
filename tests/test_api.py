@@ -78,3 +78,42 @@ def test_facts_filter_by_topic(client):
     r = client.get("/facts", params={"topic": "retiro"})
     assert {f["topic"] for f in r.json()} == {"retiro"}
     assert len(client.get("/facts").json()) >= 25
+
+
+WEAK = "hola me pasas la direccion porfa, voy a ir con un amigo en la tarde"
+
+
+def test_weak_match_stays_a_fallback_without_a_model(client):
+    assert client.post("/ask", json={"question": WEAK}).json()["grounded"] is False
+
+
+def test_weak_match_goes_to_the_model_with_more_facts(client):
+    use_model("Queda en Calle Ficticia 123, Santiago. [1]")
+    data = client.post("/ask", json={"question": WEAK}).json()
+    assert data["grounded"] is True
+    assert data["answer"] == "Queda en Calle Ficticia 123, Santiago."
+    assert data["sources"] == ["contacto-1"]
+
+
+def test_weak_match_answer_still_goes_through_the_guard(client):
+    use_model("Queda en Calle Ficticia 999, Santiago. [1]")
+    data = client.post("/ask", json={"question": WEAK}).json()
+    assert data == {"answer": FALLBACK, "grounded": False, "sources": []}
+
+
+def test_weak_match_answer_needs_a_citation(client):
+    use_model("Queda en Calle Ficticia 123, Santiago.")
+    data = client.post("/ask", json={"question": WEAK}).json()
+    assert data == {"answer": FALLBACK, "grounded": False, "sources": []}
+
+
+def test_weak_match_model_can_refuse(client):
+    use_model("No tengo ese dato.")
+    data = client.post("/ask", json={"question": WEAK}).json()
+    assert data == {"answer": FALLBACK, "grounded": False, "sources": []}
+
+
+def test_no_shared_word_never_reaches_the_model(client):
+    use_model("París. [1]")
+    data = client.post("/ask", json={"question": "cual es la capital de Francia"}).json()
+    assert data == {"answer": FALLBACK, "grounded": False, "sources": []}

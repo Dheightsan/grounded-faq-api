@@ -58,10 +58,13 @@ def test_with_model_that_quotes_the_best_fact():
     model = mock_model(lambda request: reply(f"{first_fact(request)} [1]"))
     rows = run_questions(model=model)
     total = summarize(rows)[-1]
-    assert total == summarize(run_questions())[-1]
-    assert model.calls == total["correct"] + total["wrong"]
+    plain = summarize(run_questions())[-1]
+    # it also answers the weak matches, so it gets more right and more wrong
+    assert total["correct"] > plain["correct"]
+    assert total["wrong"] > plain["wrong"]
+    assert model.calls == sum(r["step"] != "no_match" for r in rows)
     assert model.failed == 0
-    assert {r["step"] for r in rows} == {"model", "no_match"}
+    assert {r["step"] for r in rows} == {"model", "rescued", "no_match"}
 
 
 def test_with_model_counts_what_the_guard_blocks():

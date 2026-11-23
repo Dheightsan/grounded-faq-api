@@ -94,6 +94,15 @@ class Retriever:
             score += self._idf(term) * tf * (self.k1 + 1) / norm
         return score
 
+    def _rank(self, query: str) -> tuple[list[str], list[tuple[int, float]]]:
+        terms = [t for t in map(self._resolve, tokenize(query)) if t]
+        if not terms or not self.facts:
+            return terms, []
+        scored = [(i, self._score(terms, i)) for i in range(len(self.facts))]
+        scored = [s for s in scored if s[1] > 0]
+        scored.sort(key=lambda s: s[1], reverse=True)
+        return terms, scored
+
     def search(self, query: str, limit: int = 3) -> list[tuple[Fact, float]]:
         """Top facts for the query, or [] if the best one is a weak match.
 
@@ -101,17 +110,17 @@ class Retriever:
         words that carry most of the question (a service the shop does not
         have, a phone number it never gave).
         """
-        terms = [t for t in map(self._resolve, tokenize(query)) if t]
-        if not terms or not self.facts:
-            return []
-        scored = [(i, self._score(terms, i)) for i in range(len(self.facts))]
-        scored = [s for s in scored if s[1] > 0]
-        scored.sort(key=lambda s: s[1], reverse=True)
+        terms, scored = self._rank(query)
         if not scored or scored[0][1] < MIN_SCORE:
             return []
         if self._coverage(terms, scored[0][0]) < MIN_COVERAGE:
             return []
         return [(self.facts[i], score) for i, score in scored[:limit]]
+
+    def candidates(self, query: str, limit: int = 5) -> list[Fact]:
+        """Top facts that share any word with the query, with no score or coverage floor."""
+        _, scored = self._rank(query)
+        return [self.facts[i] for i, _ in scored[:limit]]
 
     def by_topic(self, topic: str | None) -> list[Fact]:
         if not topic:

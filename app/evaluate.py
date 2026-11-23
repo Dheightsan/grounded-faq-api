@@ -205,6 +205,7 @@ def model_lines(rows: list[dict], model: CountedModel) -> list[str]:
     return [
         "",
         f"model: {model.name}, {model.calls} calls, {model.failed} failed",
+        f"  answered after a weak match: {steps.count('rescued')}",
         f"  answers blocked by the guard: {steps.count('blocked')}",
         f"  answers with no fact cited: {steps.count('uncited')}",
         f"  refused by the model: {steps.count('refused')}",
