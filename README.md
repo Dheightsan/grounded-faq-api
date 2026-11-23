@@ -26,6 +26,25 @@ uvicorn app.main:app --reload
 It runs without any key. With no model configured, the answer is the text of the
 best matching fact.
 
+## Docker
+
+```bash
+docker compose up
+```
+
+This starts the API on `localhost:8000` and n8n on `localhost:5678`, with the two
+workflows from `n8n/` imported and published. Send a message the way WhatsApp
+would:
+
+```bash
+curl -s localhost:5678/webhook/whatsapp -H "Content-Type: application/json" \
+  -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"56911111111","id":"m1","type":"text","text":{"body":"hola"}}]}}]}]}'
+```
+
+The n8n editor asks for a local owner account the first time you open it. The
+keys default to `change-me`. Set `AGENT_API_KEY` and `WHATSAPP_VERIFY_TOKEN`
+before putting it anywhere public.
+
 ## Example
 
 ```bash

@@ -1,0 +1,40 @@
+services:
+  n8n:
+    image: n8nio/n8n:2.48.7
+    environment:
+      AGENT_API_KEY: ${AGENT_API_KEY:-change-me}
+      GENERIC_TIMEZONE: America/Santiago
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+    volumes:
+      - ./n8n:/workflows:ro
+      - n8n_data:/home/node/.n8n
+    ports:
+      - "5678:5678"
+      - "8000:8000"
+    entrypoint: ["tini", "--", "/bin/sh", "-c"]
+    command:
+      - |
+        printf '[{"id":"agentApiKey00001","name":"Agent API key","type":"httpHeaderAuth","data":{"name":"X-API-Key","value":"%s"}}]' "$$AGENT_API_KEY" > /tmp/credentials.json &&
+        n8n import:credentials --input=/tmp/credentials.json &&
+        rm /tmp/credentials.json &&
+        n8n import:workflow --separate --input=/workflows &&
+        n8n publish:workflow --id=waAgentDemo00001 &&
+        n8n publish:workflow --id=waRemindersDemo1 &&
+        exec n8n start
+
+  api:
+    build: .
+    # same network as n8n, the workflows call 127.0.0.1:8000
+    network_mode: "service:n8n"
+    environment:
+      AGENT_API_KEY: ${AGENT_API_KEY:-change-me}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-change-me}
+      AGENT_DB_PATH: /data/agent.db
+    volumes:
+      - api_data:/data
+
+volumes:
+  n8n_data:
+  api_data:
