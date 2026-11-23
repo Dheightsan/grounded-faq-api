@@ -49,11 +49,25 @@ def test_model_that_invents_a_number_is_blocked(client):
 
 
 def test_model_with_valid_answer_passes(client):
-    use_model("El taladro percutor cuesta $42.990.")
+    use_model("El taladro percutor cuesta $42.990. [1]")
     data = client.post("/ask", json={"question": "cuanto cuesta el taladro"}).json()
     assert data["answer"] == "El taladro percutor cuesta $42.990."
     assert data["grounded"] is True
-    assert "precio-taladro" in data["sources"]
+    assert data["sources"] == ["precio-taladro"]
+
+
+def test_model_answer_without_a_citation_is_dropped(client):
+    use_model("Sale $42.990 el taladro.")
+    data = client.post("/ask", json={"question": "cuanto cuesta el taladro"}).json()
+    assert data["answer"] == "El taladro percutor de 650 W cuesta $42.990."
+    assert data["sources"] == ["precio-taladro"]
+
+
+def test_number_from_a_fact_the_model_did_not_cite_is_blocked(client):
+    # fact 1 is the drill, the price in the answer is from another fact
+    use_model("El taladro cuesta $3.490. [1]")
+    data = client.post("/ask", json={"question": "cuanto cuesta el taladro y los clavos"}).json()
+    assert data == {"answer": FALLBACK, "grounded": False, "sources": []}
 
 
 def test_empty_question_is_rejected(client):

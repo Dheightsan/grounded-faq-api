@@ -8,10 +8,12 @@ from app.guard import FALLBACK
 from app.store import Fact
 
 SYSTEM_MESSAGE = (
-    "Eres el asistente de una tienda. Responde en español usando solo los hechos "
-    "entregados. No agregues cifras, horarios, enlaces ni correos que no estén en los "
-    "hechos. Si los hechos no alcanzan para responder, responde exactamente: "
-    f"{FALLBACK}"
+    "Eres el asistente de una tienda. Responde en español, en una o dos frases, usando "
+    "solo los hechos numerados que se entregan. No agregues cifras, horarios, enlaces "
+    "ni correos que no estén en los hechos. Termina la respuesta con el número del "
+    "hecho que usaste entre corchetes, por ejemplo [2]. Si preguntan por un producto o "
+    "servicio que no aparece en los hechos, no respondas con el dato de otro. Si "
+    f"ningún hecho responde la pregunta, responde exactamente: {FALLBACK}"
 )
 
 
@@ -40,7 +42,7 @@ class ChatClient:
         return cls(base_url, api_key, os.environ.get("MODEL_NAME", "default"))
 
     def build_payload(self, question: str, facts: list[Fact]) -> dict:
-        listing = "\n".join(f"- {f.text}" for f in facts)
+        listing = "\n".join(f"{n}. {f.text}" for n, f in enumerate(facts, 1))
         return {
             "model": self.model,
             "temperature": 0,

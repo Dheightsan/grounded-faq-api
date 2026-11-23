@@ -1,24 +1,27 @@
-"""Run the eval set without a model and print the numbers.
+"""Run the eval set and print the numbers.
 
-python -m app.evaluate             # plain text
+python -m app.evaluate             # plain text, no model
 python -m app.evaluate --markdown  # table for the README
 python -m app.evaluate --questions data/eval_heldout.json
+python -m app.evaluate --with-model  # needs MODEL_API_KEY and MODEL_BASE_URL
 """
 
 import argparse
 import json
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from app.agenda import load_agenda
 from app.agent import Agent
+from app.chat_client import ChatClient
 from app.db import AgentDB
 from app.guard import FALLBACK
 from app.retrieval import Retriever
-from app.service import answer_question
-from app.store import load_facts
+from app.service import Model, trace_answer
+from app.store import Fact, load_facts
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
@@ -31,19 +34,42 @@ LUIS = "56922222222"
 BOOK = ["reservar", "si", "Ana Pérez", "1", "1", "1", "si"]  # service, day, slot, confirm
 
 
-def run_questions(path: Path = DATA / "eval.json") -> list[dict]:
+class CountedModel:
+    """Counts the calls to a model and tries again when one fails."""
+
+    def __init__(self, model: Model, name: str = "", retries: int = 3, wait: float = 10.0):
+        self.model = model
+        self.name = name
+        self.retries = retries
+        self.wait = wait
+        self.calls = 0
+        self.failed = 0
+
+    def complete(self, question: str, facts: list[Fact]) -> str | None:
+        self.calls += 1
+        for attempt in range(self.retries + 1):
+            text = self.model.complete(question, facts)
+            if text is not None:
+                return text
+            if attempt < self.retries:
+                time.sleep(self.wait)
+        self.failed += 1
+        return None
+
+
+def run_questions(path: Path = DATA / "eval.json", model: Model | None = None) -> list[dict]:
     retrievers = {name: Retriever(load_facts(p)) for name, p in FACTS.items()}
     rows = []
     for item in json.loads(path.read_text(encoding="utf-8")):
-        answer = answer_question(item["q"], retrievers[item["set"]], None)
-        got = answer.sources[0] if answer.grounded else "fallback"
+        answer, step = trace_answer(item["q"], retrievers[item["set"]], model)
+        got = ",".join(answer.sources) if answer.grounded else "fallback"
         if item["expect"] == "fallback":
             outcome = "rejected" if got == "fallback" else "wrong"
-        elif got == item["expect"]:
+        elif item["expect"] in answer.sources:
             outcome = "correct"
         else:
             outcome = "missed" if got == "fallback" else "wrong"
-        rows.append({**item, "got": got, "outcome": outcome})
+        rows.append({**item, "got": got, "outcome": outcome, "step": step, "answer": answer.answer})
     return rows
 
 
@@ -174,7 +200,24 @@ def run_scripts() -> dict[str, bool]:
     return {name: bool(fn()) for name, fn in SCRIPTS.items()}
 
 
-def render(summary: list[dict], scripts: dict[str, bool], rows: list[dict], markdown: bool) -> str:
+def model_lines(rows: list[dict], model: CountedModel) -> list[str]:
+    steps = [r["step"] for r in rows]
+    return [
+        "",
+        f"model: {model.name}, {model.calls} calls, {model.failed} failed",
+        f"  answers blocked by the guard: {steps.count('blocked')}",
+        f"  answers with no fact cited: {steps.count('uncited')}",
+        f"  refused by the model: {steps.count('refused')}",
+    ]
+
+
+def render(
+    summary: list[dict],
+    scripts: dict[str, bool],
+    rows: list[dict],
+    markdown: bool,
+    model: CountedModel | None = None,
+) -> str:
     head = ["set", "answerable", "correct", "missed", "out_of_scope", "rejected", "wrong"]
     lines = []
     if markdown:
@@ -184,6 +227,8 @@ def render(summary: list[dict], scripts: dict[str, bool], rows: list[dict], mark
     else:
         lines.append("  ".join(f"{h:>12}" for h in head))
         lines += ["  ".join(f"{s[h]!s:>12}" for h in head) for s in summary]
+    if model:
+        lines += model_lines(rows, model)
     passed = sum(scripts.values())
     lines.append("")
     lines.append(f"conversation scripts: {passed}/{len(scripts)} pass")
@@ -194,7 +239,7 @@ def render(summary: list[dict], scripts: dict[str, bool], rows: list[dict], mark
         lines.append("failed questions:")
         for r in bad:
             miss = f"expected {r['expect']}, got {r['got']}"
-            lines.append(f"  [{r['outcome']}] {r['set']}: {r['q']} ({miss})")
+            lines.append(f"  [{r['outcome']}] {r['set']}: {r['q']} ({miss}, {r['step']})")
     return "\n".join(lines)
 
 
@@ -202,11 +247,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--markdown", action="store_true")
     parser.add_argument("--questions", type=Path, default=DATA / "eval.json")
+    parser.add_argument("--with-model", action="store_true")
+    parser.add_argument("--save", type=Path, help="write every question and answer as JSON")
     args = parser.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    rows = run_questions(args.questions)
-    print(render(summarize(rows), run_scripts(), rows, args.markdown))
+    model = None
+    if args.with_model:
+        client = ChatClient.from_env()
+        if client is None:
+            sys.exit("--with-model needs MODEL_API_KEY and MODEL_BASE_URL")
+        client.timeout = 60.0
+        model = CountedModel(client, client.model)
+    rows = run_questions(args.questions, model)
+    if args.save:
+        args.save.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(render(summarize(rows), run_scripts(), rows, args.markdown, model))
 
 
 if __name__ == "__main__":
