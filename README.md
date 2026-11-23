@@ -4,6 +4,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 
+![Booking a time with the barber shop agent in the terminal](docs/demo.gif)
+
+The [WhatsApp agent](#whatsapp-agent) in the terminal, with `python -m app.cli`.
+
 A small FastAPI service that answers questions only from a fixed fact file
 (`data/store.json`, a fictional hardware store in Santiago). When the fact is not
 there, it says `No tengo ese dato.` instead of guessing.
