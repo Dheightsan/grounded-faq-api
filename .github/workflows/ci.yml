@@ -18,6 +18,7 @@ jobs:
 
   compose:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - run: docker compose up -d --build
@@ -35,7 +36,7 @@ jobs:
           done
           echo "no reply from the agent: $reply"
           exit 1
-      - name: meta handshake through n8n
+      - name: Meta handshake through n8n
         run: |
           q="hub.mode=subscribe&hub.verify_token=change-me&hub.challenge=4242"
           test "$(curl -s -m 10 "localhost:5678/webhook/whatsapp?$q")" = "4242"

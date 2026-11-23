@@ -41,8 +41,11 @@ curl -s localhost:5678/webhook/whatsapp -H "Content-Type: application/json" \
   -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"56911111111","id":"m1","type":"text","text":{"body":"hola"}}]}}]}]}'
 ```
 
-The n8n editor asks for a local owner account the first time you open it. The
-keys default to `change-me`. Set `AGENT_API_KEY` and `WHATSAPP_VERIFY_TOKEN`
+The reply comes back in the response and nothing is sent to WhatsApp. The n8n
+editor asks for a local owner account the first time you open it. The workflows
+are imported again on every start, so changes made in the editor are lost.
+
+The keys default to `change-me`. Set `AGENT_API_KEY` and `WHATSAPP_VERIFY_TOKEN`
 before putting it anywhere public.
 
 ## Example
