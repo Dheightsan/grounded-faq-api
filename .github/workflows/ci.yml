@@ -15,3 +15,29 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: pytest -q
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up -d --build
+      - name: message through the n8n webhook
+        run: |
+          for i in $(seq 1 60); do
+            reply=$(curl -s -m 10 localhost:5678/webhook/whatsapp \
+              -H "Content-Type: application/json" \
+              -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"56911111111","id":"ci-'"$i"'","type":"text","text":{"body":"hola"}}]}}]}]}' || true)
+            if echo "$reply" | grep -q "Los Aromos"; then
+              echo "$reply"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "no reply from the agent: $reply"
+          exit 1
+      - name: meta handshake through n8n
+        run: |
+          q="hub.mode=subscribe&hub.verify_token=change-me&hub.challenge=4242"
+          test "$(curl -s -m 10 "localhost:5678/webhook/whatsapp?$q")" = "4242"
+      - if: failure()
+        run: docker compose logs --tail 200
