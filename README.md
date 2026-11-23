@@ -33,8 +33,8 @@ docker compose up
 ```
 
 This starts the API on `localhost:8000` and n8n on `localhost:5678`, with the two
-workflows from `n8n/` imported and published. Send a message the way WhatsApp
-would:
+workflows from `n8n/` imported and published. To send a message the way
+WhatsApp would, post it to the n8n webhook.
 
 ```bash
 curl -s localhost:5678/webhook/whatsapp -H "Content-Type: application/json" \
